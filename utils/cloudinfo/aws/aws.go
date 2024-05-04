@@ -15,12 +15,13 @@
 package cloudinfo
 
 import (
+	"context"
+	"io"
 	"os"
 	"strings"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/ec2metadata"
-	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/feature/ec2/imds"
 
 	info "github.com/google/cadvisor/info/v1"
 	"github.com/google/cadvisor/utils/cloudinfo"
@@ -56,23 +57,28 @@ func fileContainsAmazonIdentifier(filename string) bool {
 	return strings.Contains(string(fileContent), amazon)
 }
 
-func getAwsMetadata(name string) string {
-	sess, err := session.NewSession(&aws.Config{})
+func getAwsMetadata(ctx context.Context, name string) string {
+	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
 		return info.UnknownInstance
 	}
-	client := ec2metadata.New(sess)
-	data, err := client.GetMetadata(name)
+	client := imds.NewFromConfig(cfg)
+	response, err := client.GetMetadata(ctx, &imds.GetMetadataInput{Path: name})
 	if err != nil {
 		return info.UnknownInstance
 	}
-	return data
+	defer response.Content.Close()
+	data, err := io.ReadAll(response.Content)
+	if err != nil {
+		return info.UnknownInstance
+	}
+	return string(data)
 }
 
 func (provider) GetInstanceType() info.InstanceType {
-	return info.InstanceType(getAwsMetadata("instance-type"))
+	return info.InstanceType(getAwsMetadata(context.Background(), "instance-type"))
 }
 
 func (provider) GetInstanceID() info.InstanceID {
-	return info.InstanceID(getAwsMetadata("instance-id"))
+	return info.InstanceID(getAwsMetadata(context.Background(), "instance-id"))
 }
